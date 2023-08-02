@@ -2,33 +2,95 @@ import tkinter as tk
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import time
+import pandas as pd
 import random
 from itertools import cycle
 from matplotlib.widgets import Button
 import numpy as np
+from matplotlib.backends.backend_tkagg import FigureCanvasTk
 from tkinter import messagebox, filedialog
 from tkinter import ttk, Scrollbar, HORIZONTAL, VERTICAL
 from model.egresado_dao import obtener_datos_combinados, buscar, eliminar_egresado
+from model.conexion import DataBase
 
-def importar_excel():
-    # Abre el cuadro de diálogo para seleccionar el archivo Excel
-    archivo_excel = filedialog.askopenfilename(filetypes=[('Archivos Excel', '*.xlsx')])
 
-    # Procesa el archivo Excel y realiza las operaciones necesarias
-    # Aquí puedes agregar tu lógica para importar los datos del archivo Excel
 
-    # Muestra un mensaje de éxito
-    messagebox.showinfo('Importar Excel', 'Archivo Excel importado con éxito!')
+def mostrar_mensaje(mensaje):
+    ventana_mensaje = tk.Toplevel()
+    ventana_mensaje.title('Mensaje')
+    ventana_mensaje.geometry('300x150')
+
+    etiqueta_mensaje = tk.Label(ventana_mensaje, text=mensaje)
+    etiqueta_mensaje.pack()
+
+def importar_desde_tabla(tabla):
+    # Abre una ventana de diálogo para que el usuario seleccione el archivo
+    ruta_archivo = filedialog.askopenfilename(filetypes=[("Archivos CSV", "*.csv"), ("Archivos Excel", "*.xlsx")])
+
+    if ruta_archivo:
+        try:
+            # Utiliza pandas para importar los datos del archivo CSV o Excel
+            datos = pd.read_csv(ruta_archivo) if ruta_archivo.endswith('.csv') else pd.read_excel(ruta_archivo, engine='openpyxl')
+
+            # Rellena las celdas vacías en el DataFrame con un valor predeterminado, por ejemplo "N/A"
+            datos = datos.fillna("N/A")
+
+            # Conexión a la base de datos MySQL
+            db = DataBase()
+
+            # Guarda los datos en la tabla seleccionada de la base de datos
+            for _, fila in datos.iterrows():
+                columns = ', '.join(fila.index)
+                values = ', '.join('%s' for _ in fila.values)
+                update_values = ', '.join(f'{col} = %s' for col in fila.index)
+
+                query = f"INSERT INTO {tabla} ({columns}) VALUES ({values}) ON DUPLICATE KEY UPDATE {update_values}"
+
+                print(f"Query: {query}")
+
+                # Aquí, pasamos los valores de la fila dos veces para cubrir tanto el INSERT como el UPDATE
+                db.cursor.execute(query, tuple(fila.values) + tuple(fila.values))
+
+            # Hacer commit para guardar los cambios en la base de datos
+            db.connection.commit()
+            print("Commit realizado con éxito.")
+
+            # Cierra la conexión a la base de datos
+            db.cerrar()
+
+            mensaje = f"Se importaron los datos desde la tabla '{tabla}' en la base de datos."
+            mostrar_mensaje(mensaje)
+
+        except Exception as e:
+            mensaje = f"Error al importar datos: {e}"
+            mostrar_mensaje(mensaje)
+    else:
+        mensaje = "No se seleccionó ningún archivo."
+        mostrar_mensaje(mensaje)
+
 
 def crear_ventana_importar_excel():
     ventana_importar_excel = tk.Toplevel()
     ventana_importar_excel.title('Importar Excel')
+    ventana_importar_excel.geometry('400x200')  # Establece el tamaño de la ventana
 
-    # Agrega los componentes de la ventana importar excel
-    etiqueta = tk.Label(ventana_importar_excel, text='Selecciona un archivo Excel:')
-    etiqueta.pack()
+    # Lista de opciones de tablas disponibles (puedes reemplazar estos nombres con tus propias tablas)
+    opciones_tablas = ['Egresados', 'DireccionEgresado', 'Informacionegreso', 'DominioIdioma', 'DominioPaquete', 'Maestria', 'Doctorado', 'PertinenciayDisponibilidad',
+                       'EmpleoEgresado', 'IdiomaTrabajo', 'DomicilioLaboral', 'DesempeñoaLaboral', 'AspectosContratacion', 'ActualizacionConocimientos', 'ParticipacionSocial', 'ComentariosSugerencias']
 
-    boton_importar = tk.Button(ventana_importar_excel, text='Importar', command=importar_excel)
+    # Variable de control para almacenar la tabla seleccionada
+    tabla_seleccionada = tk.StringVar(ventana_importar_excel)
+    tabla_seleccionada.set(opciones_tablas[0])  # Establecer el valor predeterminado
+
+    # Menú desplegable con las opciones de tablas
+    etiqueta_tabla = tk.Label(ventana_importar_excel, text='Selecciona una tabla:')
+    etiqueta_tabla.pack()
+
+    menu_tablas = tk.OptionMenu(ventana_importar_excel, tabla_seleccionada, *opciones_tablas)
+    menu_tablas.pack()
+
+    # Botón para importar desde la tabla seleccionada
+    boton_importar = tk.Button(ventana_importar_excel, text='Importar', command=lambda: importar_desde_tabla(tabla_seleccionada.get()))
     boton_importar.pack()
 
 
@@ -40,8 +102,7 @@ def barra_menu(root):
     barra_menu.add_cascade(label='Inicio', menu=menu_inicio)
     menu_inicio.add_command(label='Salir', command=root.destroy)
 
-    barra_menu.add_cascade(label='Graficas')
-    barra_menu.add_command(label='Ingresar Egresado')
+    
     barra_menu.add_cascade(label='Importar Excel', command=crear_ventana_importar_excel)
 
 
@@ -961,8 +1022,11 @@ class Frame(tk.Frame):
 
 
     def generar_graficas(self):
-        # Cerrar todas las figuras abiertas previas
-        plt.close('all')
+        # Cerrar la figura anterior si existe
+        self.cerrar_figura()
+
+        # Desactivar la barra de navegación de Matplotlib
+        plt.rcParams['toolbar'] = 'None'
 
         # Crear la figura y el subgráfico
         self.fig, self.ax = plt.subplots(figsize=(8, 6))
@@ -985,7 +1049,7 @@ class Frame(tk.Frame):
         plt.show()
 
     def mostrar_botones_navegacion(self):
-        # Posición y tamaño de los botones
+            # Posición y tamaño de los botones
         pos_x = 0.4
         pos_y = 0.05
         width = 0.1
@@ -1036,10 +1100,8 @@ class Frame(tk.Frame):
             if self.btn_siguiente is not None:
                 self.btn_siguiente.disconnect_events()
 
-            # Cerrar la ventana que contiene la figura
-            manager = self.fig.canvas.manager
-            if manager is not None:
-                manager.destroy()
+            # Cerrar la figura
+            plt.close(self.fig)
 
             # Eliminar referencias a la figura y el toolbar
             self.fig = None
@@ -1463,12 +1525,7 @@ class Frame(tk.Frame):
         self.grid_rowconfigure(4, weight=1)  # Aumenta el tamaño de la fila 4
         self.grid_columnconfigure(0, weight=1)  # Aumenta el tamaño de la columna 0
 
-        self.boton_editar = tk.Button(self, text="Editar")
-        self.boton_editar.config(width=20, font=('Arial', 12, 'bold'),
-                                fg='#DAD5D6', bg='#39CF09',
-                                cursor='hand2', activebackground='#38D506')
-        self.boton_editar.grid(row=6, column=0, padx=10, pady=10)
-
+        
         self.boton_eliminar = tk.Button(self, text="Eliminar", command=self.eliminar_registro)
         self.boton_eliminar.config(width=20, font=('Arial', 12, 'bold'),
                                    fg='#DAD5D6', bg='#C70039',
@@ -1481,9 +1538,27 @@ class Frame(tk.Frame):
                                   cursor='hand2', activebackground='#00FFFF')
         self.boton_grafica.grid(row=6, column=2, padx=10, pady=10)
 
+            # Agregar botón de actualización
+        self.boton_actualizar = tk.Button(self, text="Actualizar", command=self.realizar_actualizacion)
+        self.boton_actualizar.config(width=20, font=('Arial', 12, 'bold'), fg='#DAD5D6', bg='#0078D7',
+                                    cursor='hand2', activebackground='#005299')
+        self.boton_actualizar.grid(row=0, column=2, padx=10, pady=10)
+
         self.grid_rowconfigure(4, minsize=50)
         self.grid_rowconfigure(5, weight=1)
         ladoy.grid(column=4, row=4, rowspan=2, sticky='ns')
+
+    def realizar_actualizacion(self, event=None):
+        # Obtener los nuevos valores mediante la función obtener_datos_combinados()
+        nuevos_valores = obtener_datos_combinados()
+
+        # Borrar las filas actuales de la tabla
+        self.tabla.delete(*self.tabla.get_children())
+
+        # Insertar los nuevos valores en la tabla
+        for i, p in enumerate(nuevos_valores):
+            self.tabla.insert('', 'end', text=str(i+1), values=p[:111])  # Mostrar hasta 110 valores
+        
 
     def realizar_busqueda(self, event=None):
         texto_busqueda = self.entry_busqueda.get()
